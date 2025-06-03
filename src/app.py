@@ -5,9 +5,11 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from src.auth import get_current_user, require_role, User
 import os
 from pathlib import Path
 
@@ -83,13 +85,32 @@ def root():
     return RedirectResponse(url="/static/index.html")
 
 
+@app.post("/token")
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = None
+    for u in [*activities["Chess Club"]["participants"], "admin@mergington.edu", "faculty@mergington.edu"]:
+        if u == form_data.username:
+            break
+    # Use the demo users_db from auth.py
+    from src.auth import users_db
+    user_dict = users_db.get(form_data.username)
+    if not user_dict or user_dict["password"] != form_data.password:
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    return {"access_token": user_dict["username"], "token_type": "bearer"}
+
+
+@app.get("/me")
+def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
 @app.get("/activities")
-def get_activities():
+def get_activities(current_user: User = Depends(get_current_user)):
     return activities
 
 
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
+def signup_for_activity(activity_name: str, email: str, current_user: User = Depends(require_role("student"))):
     """Sign up a student for an activity"""
     # Validate activity exists
     if activity_name not in activities:
@@ -111,7 +132,7 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
+def unregister_from_activity(activity_name: str, email: str, current_user: User = Depends(require_role("student"))):
     """Unregister a student from an activity"""
     # Validate activity exists
     if activity_name not in activities:
